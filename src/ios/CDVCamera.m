@@ -24,7 +24,6 @@
 #import <Cordova/NSDictionary+Extensions.h>
 #import <ImageIO/CGImageProperties.h>
 #import <AssetsLibrary/ALAssetRepresentation.h>
-#import <AssetsLibrary/AssetsLibrary.h>
 #import <ImageIO/CGImageSource.h>
 #import <ImageIO/CGImageProperties.h>
 #import <ImageIO/CGImageDestination.h>
@@ -85,7 +84,7 @@ static NSSet* org_apache_cordova_validArrowDirections;
 
     bool hasCamera = [UIImagePickerController isSourceTypeAvailable:sourceType];
     if (!hasCamera) {
-        NSLog(@"Camera.getPicture: source type %lu not available.", (unsigned long)sourceType);
+        NSLog(@"Camera.getPicture: source type %d not available.", sourceType);
         CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"no camera available"];
         [self.commandDelegate sendPluginResult:result callbackId:callbackId];
         return;
@@ -151,7 +150,13 @@ static NSSet* org_apache_cordova_validArrowDirections;
         NSDictionary* options = [command.arguments objectAtIndex:10 withDefault:nil];
         [self displayPopover:options];
     } else {
-        [self.viewController presentViewController:cameraPicker animated:YES completion:nil];
+        SEL selector = NSSelectorFromString(@"presentViewController:animated:completion:");
+        if ([self.viewController respondsToSelector:selector]) {
+            [self.viewController presentViewController:cameraPicker animated:YES completion:nil];
+        } else {
+            // deprecated as of iOS >= 6.0
+            [self.viewController presentModalViewController:cameraPicker animated:YES];
+        }
     }
     self.hasPendingOperation = YES;
 }
@@ -165,10 +170,10 @@ static NSSet* org_apache_cordova_validArrowDirections;
 
 - (void)displayPopover:(NSDictionary*)options
 {
-    NSInteger x = 0;
-    NSInteger y = 32;
-    NSInteger width = 320;
-    NSInteger height = 480;
+    int x = 0;
+    int y = 32;
+    int width = 320;
+    int height = 480;
     UIPopoverArrowDirection arrowDirection = UIPopoverArrowDirectionAny;
 
     if (options) {
@@ -177,7 +182,7 @@ static NSSet* org_apache_cordova_validArrowDirections;
         width = [options integerValueForKey:@"width" defaultValue:320];
         height = [options integerValueForKey:@"height" defaultValue:480];
         arrowDirection = [options integerValueForKey:@"arrowDir" defaultValue:UIPopoverArrowDirectionAny];
-        if (![org_apache_cordova_validArrowDirections containsObject:[NSNumber numberWithUnsignedInteger:arrowDirection]]) {
+        if (![org_apache_cordova_validArrowDirections containsObject:[NSNumber numberWithInt:arrowDirection]]) {
             arrowDirection = UIPopoverArrowDirectionAny;
         }
     }
@@ -237,7 +242,7 @@ static NSSet* org_apache_cordova_validArrowDirections;
 
 - (void)popoverControllerDidDismissPopover:(id)popoverController
 {
-    // [ self imagePickerControllerDidCancel:self.pickerController ];	'
+    // [ self imagePickerControllerDidCancel:self.pickerController ];   '
     UIPopoverController* pc = (UIPopoverController*)popoverController;
 
     [pc dismissPopoverAnimated:YES];
@@ -260,7 +265,11 @@ static NSSet* org_apache_cordova_validArrowDirections;
         cameraPicker.popoverController.delegate = nil;
         cameraPicker.popoverController = nil;
     } else {
-        [[cameraPicker presentingViewController] dismissViewControllerAnimated:YES completion:nil];
+        if ([cameraPicker respondsToSelector:@selector(presentingViewController)]) {
+            [[cameraPicker presentingViewController] dismissModalViewControllerAnimated:YES];
+        } else {
+            [[cameraPicker parentViewController] dismissModalViewControllerAnimated:YES];
+        }
     }
 
     CDVPluginResult* result = nil;
@@ -313,7 +322,7 @@ static NSSet* org_apache_cordova_validArrowDirections;
                     self.metadata = [[NSMutableDictionary alloc] init];
                     
                     NSMutableDictionary *EXIFDictionary = [[controllerMetadata objectForKey:(NSString *)kCGImagePropertyExifDictionary]mutableCopy];
-                    if (EXIFDictionary)	[self.metadata setObject:EXIFDictionary forKey:(NSString *)kCGImagePropertyExifDictionary];
+                    if (EXIFDictionary) [self.metadata setObject:EXIFDictionary forKey:(NSString *)kCGImagePropertyExifDictionary];
                     
                     [[self locationManager] startUpdatingLocation];
                     return;
@@ -353,7 +362,20 @@ static NSSet* org_apache_cordova_validArrowDirections;
     // NOT IMAGE TYPE (MOVIE)
     else {
         NSString* moviePath = [[info objectForKey:UIImagePickerControllerMediaURL] absoluteString];
-        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:moviePath];
+        
+        //================== Edited by Bun ===================
+        NSURL *url          = [[NSURL alloc] initWithString:moviePath];
+        NSData * movieData  = [NSData dataWithContentsOfURL:url];
+        float movieSize     = (float)(movieData.length/1024.0f/1024.0f);
+        
+        NSString *fileSize  = [NSString stringWithFormat:@"%.2f", movieSize];
+        NSArray *returnArr  = [NSArray arrayWithObjects: moviePath, fileSize, nil];
+
+        // Bun: comment for returning in array
+        // result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString: returnValue];
+        
+        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsArray: returnArr];
+        //================== Edited by Bun ===================
     }
 
     if (result) {
@@ -376,15 +398,14 @@ static NSSet* org_apache_cordova_validArrowDirections;
 {
     CDVCameraPicker* cameraPicker = (CDVCameraPicker*)picker;
 
-    [[cameraPicker presentingViewController] dismissViewControllerAnimated:YES completion:nil];
-
-    CDVPluginResult* result;
-    if ([ALAssetsLibrary authorizationStatus] == ALAuthorizationStatusAuthorized) {
-        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"no image selected"];   // error callback expects string ATM
+    if ([cameraPicker respondsToSelector:@selector(presentingViewController)]) {
+        [[cameraPicker presentingViewController] dismissModalViewControllerAnimated:YES];
     } else {
-        result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"has no access to assets"];   // error callback expects string ATM
+        [[cameraPicker parentViewController] dismissModalViewControllerAnimated:YES];
     }
-    
+    // popoverControllerDidDismissPopover:(id)popoverController is called if popover is cancelled
+
+    CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"no image selected"];   // error callback expects string ATM
     [self.commandDelegate sendPluginResult:result callbackId:cameraPicker.callbackId];
 
     self.hasPendingOperation = NO;
@@ -533,59 +554,101 @@ static NSSet* org_apache_cordova_validArrowDirections;
     return newImage;
 }
 
+- (void)postImage:(UIImage*)anImage withFilename:(NSString*)filename toUrl:(NSURL*)url
+{
+    self.hasPendingOperation = YES;
+
+    NSString* boundary = @"----BOUNDARY_IS_I";
+
+    NSMutableURLRequest* req = [NSMutableURLRequest requestWithURL:url];
+    [req setHTTPMethod:@"POST"];
+
+    NSString* contentType = [NSString stringWithFormat:@"multipart/form-data; boundary=%@", boundary];
+    [req setValue:contentType forHTTPHeaderField:@"Content-type"];
+
+    NSData* imageData = UIImagePNGRepresentation(anImage);
+
+    // adding the body
+    NSMutableData* postBody = [NSMutableData data];
+
+    // first parameter an image
+    [postBody appendData:[[NSString stringWithFormat:@"\r\n--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    [postBody appendData:[[NSString stringWithFormat:@"Content-Disposition: form-data; name=\"upload\"; filename=\"%@\"\r\n", filename] dataUsingEncoding:NSUTF8StringEncoding]];
+    [postBody appendData:[@"Content-Type: image/png\r\n\r\n" dataUsingEncoding : NSUTF8StringEncoding]];
+    [postBody appendData:imageData];
+
+    //  // second parameter information
+    //  [postBody appendData:[[NSString stringWithFormat:@"\r\n--%@\r\n", boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+    //  [postBody appendData:[@"Content-Disposition: form-data; name=\"some_other_name\"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    //  [postBody appendData:[@"some_other_value" dataUsingEncoding:NSUTF8StringEncoding]];
+    //  [postBody appendData:[[NSString stringWithFormat:@"\r\n--%@--\r \n",boundary] dataUsingEncoding:NSUTF8StringEncoding]];
+
+    [req setHTTPBody:postBody];
+
+    NSURLResponse* response;
+    NSError* error;
+    [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&error];
+
+    //  NSData* result = [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&error];
+    //  NSString * resultStr =  [[[NSString alloc] initWithData:result encoding:NSUTF8StringEncoding] autorelease];
+
+    self.hasPendingOperation = NO;
+}
+
+
 - (CLLocationManager *)locationManager {
     
-	if (locationManager != nil) {
-		return locationManager;
-	}
+    if (locationManager != nil) {
+        return locationManager;
+    }
     
-	locationManager = [[CLLocationManager alloc] init];
-	[locationManager setDesiredAccuracy:kCLLocationAccuracyNearestTenMeters];
-	[locationManager setDelegate:self];
+    locationManager = [[CLLocationManager alloc] init];
+    [locationManager setDesiredAccuracy:kCLLocationAccuracyNearestTenMeters];
+    [locationManager setDelegate:self];
     
-	return locationManager;
+    return locationManager;
 }
 
 - (void)locationManager:(CLLocationManager*)manager didUpdateToLocation:(CLLocation*)newLocation fromLocation:(CLLocation*)oldLocation
 {
-	if (locationManager != nil) {
-		[self.locationManager stopUpdatingLocation];
-		self.locationManager = nil;
+    if (locationManager != nil) {
+        [self.locationManager stopUpdatingLocation];
+        self.locationManager = nil;
         
-		NSMutableDictionary *GPSDictionary = [[NSMutableDictionary dictionary] init];
+        NSMutableDictionary *GPSDictionary = [[NSMutableDictionary dictionary] init];
         
-		CLLocationDegrees latitude  = newLocation.coordinate.latitude;
-		CLLocationDegrees longitude = newLocation.coordinate.longitude;
+        CLLocationDegrees latitude  = newLocation.coordinate.latitude;
+        CLLocationDegrees longitude = newLocation.coordinate.longitude;
         
-		// latitude
-		if (latitude < 0.0) {
-			latitude = latitude * -1.0f;
-			[GPSDictionary setObject:@"S" forKey:(NSString*)kCGImagePropertyGPSLatitudeRef];
-		} else {
-			[GPSDictionary setObject:@"N" forKey:(NSString*)kCGImagePropertyGPSLatitudeRef];
-		}
-		[GPSDictionary setObject:[NSNumber numberWithFloat:latitude] forKey:(NSString*)kCGImagePropertyGPSLatitude];
+        // latitude
+        if (latitude < 0.0) {
+            latitude = latitude * -1.0f;
+            [GPSDictionary setObject:@"S" forKey:(NSString*)kCGImagePropertyGPSLatitudeRef];
+        } else {
+            [GPSDictionary setObject:@"N" forKey:(NSString*)kCGImagePropertyGPSLatitudeRef];
+        }
+        [GPSDictionary setObject:[NSNumber numberWithFloat:latitude] forKey:(NSString*)kCGImagePropertyGPSLatitude];
         
-		// longitude
-		if (longitude < 0.0) {
-			longitude = longitude * -1.0f;
-			[GPSDictionary setObject:@"W" forKey:(NSString*)kCGImagePropertyGPSLongitudeRef];
-		}
-		else {
-			[GPSDictionary setObject:@"E" forKey:(NSString*)kCGImagePropertyGPSLongitudeRef];
-		}
-		[GPSDictionary setObject:[NSNumber numberWithFloat:longitude] forKey:(NSString*)kCGImagePropertyGPSLongitude];
+        // longitude
+        if (longitude < 0.0) {
+            longitude = longitude * -1.0f;
+            [GPSDictionary setObject:@"W" forKey:(NSString*)kCGImagePropertyGPSLongitudeRef];
+        }
+        else {
+            [GPSDictionary setObject:@"E" forKey:(NSString*)kCGImagePropertyGPSLongitudeRef];
+        }
+        [GPSDictionary setObject:[NSNumber numberWithFloat:longitude] forKey:(NSString*)kCGImagePropertyGPSLongitude];
         
-		// altitude
+        // altitude
         CGFloat altitude = newLocation.altitude;
         if (!isnan(altitude)){
-			if (altitude < 0) {
-				altitude = -altitude;
-				[GPSDictionary setObject:@"1" forKey:(NSString *)kCGImagePropertyGPSAltitudeRef];
-			} else {
-				[GPSDictionary setObject:@"0" forKey:(NSString *)kCGImagePropertyGPSAltitudeRef];
-			}
-			[GPSDictionary setObject:[NSNumber numberWithFloat:altitude] forKey:(NSString *)kCGImagePropertyGPSAltitude];
+            if (altitude < 0) {
+                altitude = -altitude;
+                [GPSDictionary setObject:@"1" forKey:(NSString *)kCGImagePropertyGPSAltitudeRef];
+            } else {
+                [GPSDictionary setObject:@"0" forKey:(NSString *)kCGImagePropertyGPSAltitudeRef];
+            }
+            [GPSDictionary setObject:[NSNumber numberWithFloat:altitude] forKey:(NSString *)kCGImagePropertyGPSAltitude];
         }
         
         // Time and date
@@ -596,18 +659,18 @@ static NSSet* org_apache_cordova_validArrowDirections;
         [formatter setDateFormat:@"yyyy:MM:dd"];
         [GPSDictionary setObject:[formatter stringFromDate:newLocation.timestamp] forKey:(NSString *)kCGImagePropertyGPSDateStamp];
         
-		[self.metadata setObject:GPSDictionary forKey:(NSString *)kCGImagePropertyGPSDictionary];
- 		[self imagePickerControllerReturnImageResult];
-	}
+        [self.metadata setObject:GPSDictionary forKey:(NSString *)kCGImagePropertyGPSDictionary];
+        [self imagePickerControllerReturnImageResult];
+    }
 }
 
 - (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
-	if (locationManager != nil) {
-		[self.locationManager stopUpdatingLocation];
-		self.locationManager = nil;
+    if (locationManager != nil) {
+        [self.locationManager stopUpdatingLocation];
+        self.locationManager = nil;
         
-		[self imagePickerControllerReturnImageResult];
-	}
+        [self imagePickerControllerReturnImageResult];
+    }
 }
 
 - (void)imagePickerControllerReturnImageResult
